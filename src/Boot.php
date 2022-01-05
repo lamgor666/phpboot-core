@@ -133,58 +133,53 @@ final class Boot
             return;
         }
 
-        try {
-            $response->withExceptionHandlers(self::getExceptionHandlers());
-            $ctx = RequestContext::fromUri($request->getRequestUrl());
-            $ctx->setMethod($request->getMethod());
-            $routes = new RouteCollection();
-            $workerId = Swoole::getWorkerId();
-            $routeItems = [];
-            $handlers = [];
+        self::checkNecessaryExceptionHandlers();
+        $response->withExceptionHandlers(self::getExceptionHandlers());
+        $ctx = RequestContext::fromUri($request->getRequestUrl());
+        $ctx->setMethod($request->getMethod());
+        $routes = new RouteCollection();
+        $workerId = Swoole::getWorkerId();
+        $routeItems = [];
+        $handlers = [];
 
-            if ($workerId >= 0) {
-                $rulesKey = "route_items_worker$workerId";
-                $routeItems = self::$map1[$rulesKey];
+        if ($workerId >= 0) {
+            $rulesKey = "route_items_worker$workerId";
+            $routeItems = self::$map1[$rulesKey];
 
-                if (!is_array($routeItems)) {
-                    $routeItems = [];
-                }
-
-                $handlersKey = "request_handlers_worker$workerId";
-                $handlers = self::$map1[$handlersKey];
-
-                if (!is_array($handlers)) {
-                    $handlers = [];
-                }
-            } else {
-                $cacheFile = RouteRulesBuilder::cacheFile();
-
-                if ($cacheFile !== '' && is_file($cacheFile)) {
-                    try {
-                        $cache = include(RouteRulesBuilder::cacheFile());
-                    } catch (Throwable $ex) {
-                        $cache = [];
-                    }
-
-                    if (is_array($cache) && is_array($cache['routeItems'])) {
-                        $routeItems = $cache['routeItems'];
-                    }
-
-                    if (is_array($cache) && is_array($cache['handlers'])) {
-                        $handlers = $cache['handlers'];
-                    }
-                }
+            if (!is_array($routeItems)) {
+                $routeItems = [];
             }
 
-            /* @var Route $route */
-            foreach ($routeItems as $route) {
-                $handlerName = $route->getOption('handlerName');
-                $routes->add($handlerName, $route);
+            $handlersKey = "request_handlers_worker$workerId";
+            $handlers = self::$map1[$handlersKey];
+
+            if (!is_array($handlers)) {
+                $handlers = [];
             }
-        } catch (Throwable $ex) {
-            $response->withPayload($ex);
-            $response->send();
-            return;
+        } else {
+            $cacheFile = RouteRulesBuilder::cacheFile();
+
+            if ($cacheFile !== '' && is_file($cacheFile)) {
+                try {
+                    $cache = include(RouteRulesBuilder::cacheFile());
+                } catch (Throwable $ex) {
+                    $cache = [];
+                }
+
+                if (is_array($cache) && is_array($cache['routeItems'])) {
+                    $routeItems = $cache['routeItems'];
+                }
+
+                if (is_array($cache) && is_array($cache['handlers'])) {
+                    $handlers = $cache['handlers'];
+                }
+            }
+        }
+
+        /* @var Route $route */
+        foreach ($routeItems as $route) {
+            $handlerName = $route->getOption('handlerName');
+            $routes->add($handlerName, $route);
         }
 
         $matcher = new UrlMatcher($routes, $ctx);
