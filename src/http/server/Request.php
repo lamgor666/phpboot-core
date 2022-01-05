@@ -6,8 +6,8 @@ use Lcobucci\JWT\Parser;
 use Lcobucci\JWT\Token;
 use phpboot\common\Cast;
 use phpboot\common\constant\Regexp;
-use phpboot\common\constant\RequestParamSecurityMode as SecurityMode;
-use phpboot\mvc\RouteRule;
+use phpboot\common\constant\ReqParamSecurityMode as SecurityMode;
+use phpboot\common\util\JsonUtils;
 use phpboot\common\HtmlPurifier;
 use phpboot\common\swoole\Swoole;
 use phpboot\common\util\ArrayUtils;
@@ -49,11 +49,6 @@ final class Request
     private $formData = [];
 
     /**
-     * @var array
-     */
-    private $pathVariables = [];
-
-    /**
      * @var string
      */
     private $body = '';
@@ -84,9 +79,9 @@ final class Request
     private $cookieParams = [];
 
     /**
-     * @var RouteRule|null
+     * @var array
      */
-    private $routeRule = null;
+    private $contextParams = [];
 
     private function __construct($swooleHttpRequest = null)
     {
@@ -112,19 +107,15 @@ final class Request
         return new self($swooleHttpRequest);
     }
 
-    public function withRouteRule(RouteRule $rule): Request
+    public function withContextParam(string $name, $value): Request
     {
-        $this->routeRule = $rule;
+        $this->contextParams[$name] = $value;
         return $this;
     }
 
-    public function withPathVariables(array $pathVariables): Request
+    public function getContextParam(string $name)
     {
-        if (ArrayUtils::isAssocArray($pathVariables)) {
-            $this->pathVariables = $pathVariables;
-        }
-
-        return $this;
+        return $this->contextParams[$name];
     }
 
     public function getProtocolVersion(): string
@@ -183,6 +174,21 @@ final class Request
         return $this->queryParams;
     }
 
+    public function getUploadedFile(string $key): ?UploadedFile
+    {
+        $files = $this->uploadedFiles;
+        $matched = null;
+
+        foreach ($files as $entry) {
+            if ($entry->getFormFieldName() === $key) {
+                $matched = $entry;
+                break;
+            }
+        }
+
+        return $matched instanceof UploadedFile ? $matched : null;
+    }
+
     public function getUploadedFiles(): array
     {
         return $this->uploadedFiles;
@@ -191,6 +197,42 @@ final class Request
     public function getRawBody(): string
     {
         return $this->body;
+    }
+
+    public function getMap($rules = []): array
+    {
+        if (is_string($rules)) {
+            $rules = $rules === '' ? [] : preg_split(Regexp::COMMA_SEP, $rules);
+        } else if (!ArrayUtils::isStringArray($rules)) {
+            $rules = [];
+        }
+
+        $isGet = strtoupper($this->getMethod()) === 'GET';
+        $contentType = $this->getHeader('Content-Type');
+        $isJsonPayload = stripos($contentType, 'application/json') !== false;
+
+        $isXmlPayload = stripos($contentType, 'application/xml') !== false ||
+            stripos($contentType, 'text/xml') !== false;
+
+        if ($isGet) {
+            $map1 = $this->getQueryParams();
+        } else if ($isJsonPayload) {
+            $map1 = JsonUtils::mapFrom($this->getRawBody());
+        } else if ($isXmlPayload) {
+            $map1 = StringUtils::xml2assocArray($this->getRawBody());
+        } else {
+            $map1 = array_merge($this->getQueryParams(), $this->getFormData());
+        }
+
+        if (!is_array($map1) || empty($map1)) {
+            return [];
+        }
+
+        if (!is_array($rules) || empty($rules)) {
+            return $map1;
+        }
+
+        return ArrayUtils::requestParams($map1, $rules);
     }
 
     /**
@@ -281,40 +323,45 @@ final class Request
         return is_array($parts) && !empty($parts) ? trim($parts[0]) : '';
     }
 
-    public function getPathVariables(): array
-    {
-        return $this->pathVariables;
-    }
-
     public function getFormData(): array
     {
         return $this->formData;
     }
 
-    public function getRouteRule(): RouteRule
+    public function jwtIntCliam(string $name, $default = PHP_INT_MIN): int
     {
-        $rule = $this->routeRule;
-        return $rule instanceof RouteRule ? $rule : RouteRule::create();
-    }
+        $dv = PHP_INT_MIN;
+        $n1 = Cast::toInt($default);
 
-    public function jwtIntCliam(string $name, int $default = PHP_INT_MIN): int
-    {
-        return $this->jwt === null ? $default : JwtUtils::intClaim($this->jwt, $name, $default);
+        if ($n1 !== PHP_INT_MIN) {
+            $dv = $n1;
+        }
+
+        return $this->jwt === null ? $dv : JwtUtils::intClaim($this->jwt, $name, $dv);
     }
 
     public function jwtFloatClaim(string $name, float $default = PHP_FLOAT_MIN): float
     {
-        return $this->jwt === null ? $default : JwtUtils::floatClaim($this->jwt, $name, $default);
+        $dv = PHP_FLOAT_MIN;
+        $n1 = Cast::toFloat($default);
+
+        if ($n1 !== PHP_FLOAT_MIN) {
+            $dv = $n1;
+        }
+
+        return $this->jwt === null ? $dv : JwtUtils::floatClaim($this->jwt, $name, $dv);
     }
 
-    public function jwtBooleanClaim(string $name, bool $default = false): bool
+    public function jwtBooleanClaim(string $name, $default = false): bool
     {
-        return $this->jwt === null ? $default : JwtUtils::booleanClaim($this->jwt, $name, $default);
+        $dv = Cast::toBoolean($default);
+        return $this->jwt === null ? $dv : JwtUtils::booleanClaim($this->jwt, $name, $dv);
     }
 
-    public function jwtStringClaim(string $name, string $default = ''): string
+    public function jwtStringClaim(string $name, $default = ''): string
     {
-        return $this->jwt === null ? $default : JwtUtils::stringClaim($this->jwt, $name, $default);
+        $dv = Cast::toString($default);
+        return $this->jwt === null ? $dv : JwtUtils::stringClaim($this->jwt, $name, $dv);
     }
 
     public function jwtArrayClaim(string $name): array
@@ -322,48 +369,88 @@ final class Request
         return $this->jwt === null ? [] : JwtUtils::arrayClaim($this->jwt, $name);
     }
 
-    public function pathVariableAsInt(string $name, int $default = PHP_INT_MIN): int
+    public function pathVariableAsInt(string $name, $default = PHP_INT_MIN): int
     {
-        return Cast::toInt($this->pathVariables[$name], $default);
+        $dv = PHP_INT_MIN;
+        $n1 = Cast::toInt($default);
+
+        if ($n1 !== PHP_INT_MIN) {
+            $dv = $n1;
+        }
+
+        $map1 = $this->getPathVariables();
+        return Cast::toInt($map1[$name], $dv);
     }
 
-    public function pathVariableAsFloat(string $name, float $default = PHP_FLOAT_MIN): float
+    public function pathVariableAsFloat(string $name, $default = PHP_FLOAT_MIN): float
     {
-        return Cast::toFloat($this->pathVariables[$name], $default);
+        $dv = PHP_FLOAT_MIN;
+        $n1 = Cast::toFloat($default);
+
+        if ($n1 !== PHP_FLOAT_MIN) {
+            $dv = $n1;
+        }
+
+        $map1 = $this->getPathVariables();
+        return Cast::toFloat($map1[$name], $dv);
     }
 
-    public function pathVariableAsBoolean(string $name, bool $default = false): bool
+    public function pathVariableAsBoolean(string $name, $default = false): bool
     {
-        return Cast::toBoolean($this->pathVariables[$name], $default);
+        $dv = Cast::toBoolean($default);
+        $map1 = $this->getPathVariables();
+        return Cast::toBoolean($map1[$name], $dv);
     }
 
-    public function pathVariableAsString(string $name, string $default = ''): string
+    public function pathVariableAsString(string $name, $default = ''): string
     {
-        return Cast::toString($this->pathVariables[$name], $default);
+        $dv = Cast::toString($default);
+        $map1 = $this->getPathVariables();
+        return Cast::toString($map1[$name], $dv);
     }
 
-    public function requestParamAsInt(string $name, int $default = PHP_INT_MIN): int
+    public function requestParamAsInt(string $name, $default = PHP_INT_MIN): int
     {
+        $dv = PHP_INT_MIN;
+        $n1 = Cast::toInt($default);
+
+        if ($n1 !== PHP_INT_MIN) {
+            $dv = $n1;
+        }
+
         $map1 = array_merge($this->queryParams, $this->formData);
-        return Cast::toInt($map1[$name], $default);
+        return Cast::toInt($map1[$name], $dv);
     }
 
-    public function requestParamAsFloat(string $name, float $default = PHP_FLOAT_MIN): float
+    public function requestParamAsFloat(string $name, $default = PHP_FLOAT_MIN): float
     {
+        $dv = PHP_FLOAT_MIN;
+        $n1 = Cast::toFloat($default);
+
+        if ($n1 !== PHP_FLOAT_MIN) {
+            $dv = $n1;
+        }
+
         $map1 = array_merge($this->queryParams, $this->formData);
-        return Cast::toFloat($map1[$name], $default);
+        return Cast::toFloat($map1[$name], $dv);
     }
 
-    public function requestParamAsBoolean(string $name, bool $default = false): bool
+    public function requestParamAsBoolean(string $name, $default = false): bool
     {
+        $dv = Cast::toBoolean($default);
         $map1 = array_merge($this->queryParams, $this->formData);
-        return Cast::toBoolean($map1[$name], $default);
+        return Cast::toBoolean($map1[$name], $dv);
     }
 
-    public function requestParamAsString(string $name, int $securityMode = SecurityMode::STRIP_TAGS): string
+    public function requestParamAsString(string $name, int $securityMode, $default = ''): string
     {
+        $dv = Cast::toString($default);
         $map1 = array_merge($this->queryParams, $this->formData);
         $value = Cast::toString($map1[$name]);
+
+        if ($value === '') {
+            return $dv;
+        }
 
         switch ($securityMode) {
             case SecurityMode::HTML_PURIFY:
@@ -685,5 +772,26 @@ final class Request
 
             $this->cookieParams[$key] = Cast::toString($value);
         }
+    }
+
+    private function getPathVariables(): array
+    {
+        $map1 = $this->contextParams['pathVariables'];
+
+        if (!is_array($map1)) {
+            return [];
+        }
+
+        $map2 = [];
+
+        foreach ($map1 as $key => $value) {
+            if (!is_string($key) || $key === '' || !is_string($value)) {
+                continue;
+            }
+
+            $map2[$key] = $value;
+        }
+
+        return $map2;
     }
 }

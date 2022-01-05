@@ -5,6 +5,6 @@ namespace phpboot\annotation;
 /**
  * @Annotation
  */
-final class Req
+final class RawReq
 {
 }

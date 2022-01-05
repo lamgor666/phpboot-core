@@ -2,6 +2,8 @@
 
 namespace phpboot\exception;
 
+use phpboot\common\constant\JwtVerifyErrno;
+use phpboot\common\util\JsonUtils;
 use phpboot\http\server\response\JsonResponse;
 use phpboot\http\server\response\ResponsePayload;
 use Throwable;
@@ -33,35 +35,51 @@ final class ExceptionHandlerImpl implements ExceptionHandler
         $payload = null;
 
         switch (get_class($ex)) {
-            case AccessTokenExpiredException::class:
-                if ($ex instanceof AccessTokenExpiredException) {
-                    $code = 1003;
-                    $msg = $ex->getMessage();
-                    $payload = JsonResponse::withPayload(compact('code', 'msg'));
-                }
+            case JwtAuthException::class:
+                if ($ex instanceof JwtAuthException) {
+                    switch ($ex->getErrno()) {
+                        case JwtVerifyErrno::INVALID:
+                            $code = 1002;
+                            break;
+                        case JwtVerifyErrno::EXPIRED:
+                            $code = 1003;
+                            break;
+                        default:
+                            $code = 1001;
+                            break;
+                    }
 
-                break;
-            case AccessTokenInvalidException::class:
-                if ($ex instanceof AccessTokenInvalidException) {
-                    $code = 1002;
                     $msg = $ex->getMessage();
+
+                    if ($msg === '') {
+                        switch ($code) {
+                            case 1002:
+                                $msg = '不是有效的安全令牌';
+                                break;
+                            case 1003:
+                                $msg = '安全令牌已失效';
+                                break;
+                            default:
+                                $msg = '安全令牌缺失';
+                                break;
+                        }
+                    }
+
                     $payload = JsonResponse::withPayload(compact('code', 'msg'));
                 }
 
                 break;
             case ValidateException::class:
                 if ($ex instanceof ValidateException) {
-                    $code = 1006;
-                    $msg = $ex->getErrorTips();
-                    $validateErrors = $ex->getValidateErrors();
-                    $payload = JsonResponse::withPayload(compact('code', 'msg', 'validateErrors'));
-                }
+                    if ($ex->isFailfast()) {
+                        $code = 1999;
+                        $msg = $ex->getMessage();
+                    } else {
+                        $code = 1006;
+                        $validateErrors = $ex->getValidateErrors();
+                        $msg = JsonUtils::toJson($validateErrors);
+                    }
 
-                break;
-            case RequireAccessTokenException::class:
-                if ($ex instanceof RequireAccessTokenException) {
-                    $code = 1001;
-                    $msg = $ex->getMessage();
                     $payload = JsonResponse::withPayload(compact('code', 'msg'));
                 }
 

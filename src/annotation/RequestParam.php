@@ -3,7 +3,7 @@
 namespace phpboot\annotation;
 
 use phpboot\common\Cast;
-use phpboot\common\constant\RequestParamSecurityMode as SecurityMode;
+use phpboot\common\constant\ReqParamSecurityMode as SecurityMode;
 
 /**
  * @Annotation
@@ -26,11 +26,17 @@ final class RequestParam
      */
     private $securityMode;
 
+    /**
+     * @var string
+     */
+    private $defaultValue;
+
     public function __construct($arg0 = null)
     {
         $name = '';
         $decimal = false;
         $securityMode = SecurityMode::STRIP_TAGS;
+        $defaultValue = '';
 
         $modes = [
             SecurityMode::NONE,
@@ -60,11 +66,16 @@ final class RequestParam
                     $securityMode = $n1;
                 }
             }
+
+            if (isset($arg0['defaultValue'])) {
+                $defaultValue = Cast::toString($arg0['defaultValue']);
+            }
         }
 
         $this->name = $name;
         $this->decimal = $decimal;
         $this->securityMode = $securityMode;
+        $this->defaultValue = $defaultValue;
     }
 
     /**
@@ -89,5 +100,13 @@ final class RequestParam
     public function getSecurityMode(): int
     {
         return $this->securityMode;
+    }
+
+    /**
+     * @return string
+     */
+    public function getDefaultValue(): string
+    {
+        return $this->defaultValue;
     }
 }

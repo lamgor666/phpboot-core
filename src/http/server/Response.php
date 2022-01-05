@@ -4,6 +4,7 @@ namespace phpboot\http\server;
 
 use phpboot\exception\ExceptionHandler;
 use phpboot\exception\HttpError;
+use phpboot\exception\RateLimitException;
 use phpboot\http\server\response\HtmlResponse;
 use phpboot\http\server\response\ResponsePayload;
 use phpboot\logging\LogContext;
@@ -288,15 +289,21 @@ final class Response
         $contents = '';
         
         if (Swoole::isSwooleHttpResponse($this->swooleHttpResponse)) {
-            $headers['X-Powered-By'] = 'meiguonet/Boot-swoole';
+            $headers['X-Powered-By'] = 'lamgor666/phpboot-swoole';
         } else {
-            $headers['X-Powered-By'] = 'meiguonet/Boot';
+            $headers['X-Powered-By'] = 'lamgor666/phpboot';
         }
         
         $payload = $this->payload;
         
         if ($payload instanceof HttpError) {
             $status = $payload->getStatusCode();
+            return [$status, $headers, $contents];
+        }
+
+        if ($payload instanceof RateLimitException) {
+            $status = 429;
+            $payload->addSpecifyHeaders($this);
             return [$status, $headers, $contents];
         }
         

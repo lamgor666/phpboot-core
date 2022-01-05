@@ -19,6 +19,7 @@
     "psr/log": "^1.1.4",
     "lamgor666/phpboot-common": "^1.0.0",
     "lamgor666/phpboot-dal": "^1.0.0",
-    "guzzlehttp/guzzle": "^7.4.0"
+    "guzzlehttp/guzzle": "^7.4.0",
+    "symfony/routing": "^5.4.0"
   }
 }

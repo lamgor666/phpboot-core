@@ -2,24 +2,26 @@
 
 namespace phpboot;
 
+use Closure;
 use phpboot\common\swoole\Swoole;
 use phpboot\common\util\ArrayUtils;
 use phpboot\common\util\StringUtils;
-use phpboot\exception\AccessTokenExpiredException;
-use phpboot\exception\AccessTokenInvalidException;
 use phpboot\exception\ExceptionHandler;
 use phpboot\exception\ExceptionHandlerImpl;
 use phpboot\exception\HttpError;
-use phpboot\exception\RequireAccessTokenException;
+use phpboot\exception\JwtAuthException;
 use phpboot\exception\ValidateException;
 use phpboot\http\middleware\Middleware;
 use phpboot\http\server\Request;
-use phpboot\http\server\RequestHandler;
 use phpboot\http\server\Response;
 use phpboot\http\server\response\JsonResponse;
-use phpboot\mvc\RouteRule;
-use phpboot\mvc\RoutingContext;
-use phpboot\security\CorsSettings;
+use RuntimeException;
+use Symfony\Component\Routing\Exception\MethodNotAllowedException;
+use Symfony\Component\Routing\Exception\ResourceNotFoundException;
+use Symfony\Component\Routing\Matcher\UrlMatcher;
+use Symfony\Component\Routing\RequestContext;
+use Symfony\Component\Routing\Route;
+use Symfony\Component\Routing\RouteCollection;
 use Throwable;
 
 final class Boot
@@ -31,6 +33,34 @@ final class Boot
 
     private function __construct()
     {
+    }
+
+    public static function initRouteRulesInSwooleMode(int $workerId): void
+    {
+        $filepath = RouteRulesBuilder::cacheFile();
+
+        if ($filepath === '' || !is_file($filepath)) {
+            return;
+        }
+
+        try {
+            $cache = include($filepath);
+        } catch (Throwable $ex) {
+            $cache = null;
+        }
+
+        if (!is_array($cache) || !is_array($cache['routeItems']) || !is_array($cache['handlers'])) {
+            return;
+        }
+
+        foreach ($cache['routeItems'] as $route) {
+            self::addRoute($workerId, $route);
+        }
+
+        foreach ($cache['handlers'] as $handlerName => $fn) {
+            self::addRequestHandler($workerId, $handlerName, $fn);
+            self::addControllerBean($workerId, $handlerName);
+        }
     }
 
     public static function gzipOutputEnabled(?bool $flag = null, ?int $workerId = null): bool
@@ -53,19 +83,10 @@ final class Boot
         return self::$map1[$key] === true;
     }
 
-    public static function withExceptionHandler(ExceptionHandler $handler, ?int $workerId = null): void
+    public static function withExceptionHandler(ExceptionHandler $handler): void
     {
-        self::checkNecessaryExceptionHandlers($workerId);
-
-        if (Swoole::inCoroutineMode(true)) {
-            if (!is_int($workerId)) {
-                $workerId = Swoole::getWorkerId();
-            }
-
-            $key = "exceptionHandlers_worker$workerId";
-        } else {
-            $key = 'exceptionHandlers_noworker';
-        }
+        self::checkNecessaryExceptionHandlers();
+        $key = 'exception_handlers';
 
         if (!is_array(self::$map1[$key])) {
             self::$map1[$key] = [$handler];
@@ -89,21 +110,13 @@ final class Boot
         }
     }
 
-    public static function withMiddleware(Middleware $middleware, ?int $workerId = null): void
+    public static function withMiddleware(Middleware $middleware): void
     {
-        if (self::isMiddlewareExists(get_class($middleware), $workerId)) {
+        if (self::isMiddlewareExists(get_class($middleware))) {
             return;
         }
 
-        if (Swoole::inCoroutineMode(true)) {
-            if (!is_int($workerId)) {
-                $workerId = Swoole::getWorkerId();
-            }
-
-            $key = "middlewares_worker$workerId";
-        } else {
-            $key = 'middlewares_noworker';
-        }
+        $key = 'middlewares';
 
         if (!is_array(self::$map1[$key])) {
             self::$map1[$key] = [$middleware];
@@ -112,133 +125,140 @@ final class Boot
         }
     }
 
-    public static function handleRequest(Request $request, Response $response, array $routeRules): void
+    public static function handleRequest(Request $request, Response $response): void
     {
-        $response->withExceptionHandlers(self::getExceptionHandlers());
-        $corsSettings = CorsSettings::loadCurrent();
-
-        if ($corsSettings instanceof CorsSettings) {
-            $response->withCorsSettings($corsSettings);
-        }
-
-        if (strtolower($request->getMethod()) === 'options') {
-            $response->withPayload(JsonResponse::withPayload(['status' => 200]))->send();
+        if (strtoupper($request->getMethod()) === 'OPTIONS') {
+            $response->withPayload(JsonResponse::withPayload(['code' => 200]));
+            $response->send();
             return;
         }
 
-        $httpMethod = strtoupper($request->getMethod());
-        $uri = $request->getRequestUrl();
+        try {
+            $response->withExceptionHandlers(self::getExceptionHandlers());
+            $ctx = RequestContext::fromUri($request->getRequestUrl());
+            $ctx->setMethod($request->getMethod());
+            $routes = new RouteCollection();
+            $workerId = Swoole::getWorkerId();
+            $routeItems = [];
+            $handlers = [];
 
-        if (strpos($uri, '?') !== false) {
-            $uri = substr($uri, 0, strpos($uri, '?'));
-        }
+            if ($workerId >= 0) {
+                $rulesKey = "route_items_worker$workerId";
+                $routeItems = self::$map1[$rulesKey];
 
-        $uri = StringUtils::ensureLeft(rawurldecode($uri), '/');
-        list($errorCode, $handlerFunc, $pathVariables) = self::dispatch($httpMethod, $uri, $routeRules);
+                if (!is_array($routeItems)) {
+                    $routeItems = [];
+                }
 
-        if (is_int($errorCode) && $errorCode >= 400) {
-            $response->withPayload(HttpError::create($errorCode))->send();
+                $handlersKey = "request_handlers_worker$workerId";
+                $handlers = self::$map1[$handlersKey];
+
+                if (!is_array($handlers)) {
+                    $handlers = [];
+                }
+            } else {
+                $cacheFile = RouteRulesBuilder::cacheFile();
+
+                if ($cacheFile !== '' && is_file($cacheFile)) {
+                    try {
+                        $cache = include(RouteRulesBuilder::cacheFile());
+                    } catch (Throwable $ex) {
+                        $cache = [];
+                    }
+
+                    if (is_array($cache) && is_array($cache['routeItems'])) {
+                        $routeItems = $cache['routeItems'];
+                    }
+
+                    if (is_array($cache) && is_array($cache['handlers'])) {
+                        $handlers = $cache['handlers'];
+                    }
+                }
+            }
+
+            /* @var Route $route */
+            foreach ($routeItems as $route) {
+                $handlerName = $route->getOption('handlerName');
+                $routes->add($handlerName, $route);
+            }
+        } catch (Throwable $ex) {
+            $response->withPayload($ex);
+            $response->send();
             return;
         }
 
-        if (!is_string($handlerFunc) || $handlerFunc === '') {
-            $response->withPayload(HttpError::create(400))->send();
-            return;
+        $matcher = new UrlMatcher($routes, $ctx);
+
+        try {
+            $result = $matcher->match($request->getRequestUrl());
+            $handlerFunc = $result['_route'];
+            $handler = $handlers[$handlerFunc];
+
+            if (!$handler) {
+                $response->withPayload(new RuntimeException("handler not found for request uri: {$request->getRequestUrl()}"));
+                $response->send();
+                return;
+            }
+
+            $request->withContextParam('pathVariables', ArrayUtils::removeKeys($result, '_route'));
+            $handler($request, $response);
+        } catch (Throwable $ex) {
+            if ($ex instanceof ResourceNotFoundException) {
+                $response->withPayload(HttpError::create(404));
+            } else if ($ex instanceof MethodNotAllowedException) {
+                $response->withPayload(HttpError::create(405));
+            } else {
+                $response->withPayload($ex);
+            }
         }
 
-        if (!self::setRouteRuleToRequest($request, $httpMethod, $handlerFunc, $routeRules)) {
-            $response->withPayload(HttpError::create(400))->send();
-            return;
-        }
-
-        if (is_array($pathVariables) && !empty($pathVariables)) {
-            $request->withPathVariables($pathVariables);
-        }
-
-        RequestHandler::create($request, $response)->handleRequest(self::getMiddlewares());
+        $response->send();
     }
 
-    public static function withControllers(?int $workerId = null): void
+    public static function getControllerBean(string $handlerName, ?int $workerId = null)
     {
         if (!Swoole::inCoroutineMode(true)) {
-            return;
+            return null;
         }
 
         if (!is_int($workerId) || $workerId < 0) {
             $workerId = Swoole::getWorkerId();
         }
 
+        if ($workerId < 0) {
+            return null;
+        }
+
         $key = "controllers_worker$workerId";
+        $map1 = self::$map1[$key];
 
-        if (isset(self::$map1[$key])) {
-            return;
+        if (!is_array($map1)) {
+            return null;
         }
 
-        $map1 = [];
+        list($clazz) = explode('@', $handlerName);
 
-        foreach (RoutingContext::getRouteRules() as $rule) {
-            list($clazz, $methodName) = explode('@', $rule->getHandler());
-            unset($methodName);
-
-            if (isset($map1[$clazz])) {
-                continue;
-            }
-
-            try {
-                $bean = new $clazz();
-            } catch (Throwable $ex) {
-                $bean = null;
-            }
-
-            if (!is_object($bean)) {
-                continue;
-            }
-
-            $map1[$clazz] = $bean;
+        if (!is_string($clazz) || $clazz === '') {
+            return null;
         }
 
-        self::$map1[$key] = $map1;
+        $clazz = StringUtils::ensureLeft($clazz, "\\");
+        $bean = $map1[$clazz];
+        return is_object($bean) ? $bean : null;
     }
 
-    public static function getControllerBean(string $clazz, ?int $workerId = null)
+    private static function checkNecessaryExceptionHandlers(): void
     {
-        if (Swoole::inCoroutineMode(true)) {
-            if (!is_int($workerId) || $workerId < 0) {
-                $workerId = Swoole::getWorkerId();
-            }
+        $key = 'exception_handlers';
+        $handlers = self::$map1[$key];
 
-            $key = "controllers_worker$workerId";
-            return self::$map1[$key][$clazz];
+        if (!is_array($handlers)) {
+            $handlers = [];
         }
-
-        try {
-            $bean = new $clazz();
-        } catch (Throwable $ex) {
-            $bean = null;
-        }
-
-        return $bean;
-    }
-
-    private static function checkNecessaryExceptionHandlers(?int $workerId = null): void
-    {
-        if (Swoole::inCoroutineMode(true)) {
-            if (!is_int($workerId)) {
-                $workerId = Swoole::getWorkerId();
-            }
-
-            $key = "exceptionHandlers_worker$workerId";
-        } else {
-            $key = 'exceptionHandlers_noworker';
-        }
-
-        $handlers = self::$map1[$key] ?? [];
 
         $classes = [
-            AccessTokenExpiredException::class,
-            AccessTokenInvalidException::class,
-            ValidateException::class,
-            RequireAccessTokenException::class
+            JwtAuthException::class,
+            ValidateException::class
         ];
 
         foreach ($classes as $clazz) {
@@ -259,17 +279,9 @@ final class Boot
         self::$map1[$key] = $handlers;
     }
 
-    private static function isMiddlewareExists(string $clazz, ?int $workerId = null): bool
+    private static function isMiddlewareExists(string $clazz): bool
     {
-        if (Swoole::inCoroutineMode(true)) {
-            if (!is_int($workerId)) {
-                $workerId = Swoole::getWorkerId();
-            }
-
-            $key = "middlewares_worker$workerId";
-        } else {
-            $key = 'middlewares_noworker';
-        }
+        $key = 'middlewares';
 
         if (isset(self::$map1[$key])) {
             $middlewares = self::$map1[$key];
@@ -290,135 +302,89 @@ final class Boot
     }
 
     /**
-     * @param int|null $workerId
      * @return ExceptionHandler[]
      */
-    private static function getExceptionHandlers(int $workerId = null): array
+    private static function getExceptionHandlers(): array
     {
-        if (Swoole::inCoroutineMode(true)) {
-            if (!is_int($workerId)) {
-                $workerId = Swoole::getWorkerId();
-            }
-
-            $key = "exceptionHandlers_worker$workerId";
-        } else {
-            $key = 'exceptionHandlers_noworker';
-        }
-
+        $key = 'exception_handlers';
         $handlers = self::$map1[$key];
         return is_array($handlers) ? $handlers : [];
-    }
-
-    private static function dispatch(string $httpMethod, string $uri, array $routeRules): array
-    {
-        $entries = [];
-
-        /* @var RouteRule $rr */
-        foreach ($routeRules as $rr) {
-            $requestMapping = $rr->getRequestMapping();
-
-            if ($requestMapping === $uri) {
-                $entries[] = [
-                    'httpMethod' => strtoupper($rr->getHttpMethod()),
-                    'handler' => $rr->getHandler()
-                ];
-
-                continue;
-            }
-
-            if ($rr->getRegex() === '') {
-                continue;
-            }
-
-            $pathVariableNames = $rr->getPathVariableNames();
-            $matches = [];
-            preg_match($rr->getRegex(), $uri, $matches);
-
-            if (!ArrayUtils::isStringArray($matches) || count($matches) <= count($pathVariableNames)) {
-                continue;
-            }
-
-            $pathVariables = [];
-
-            foreach ($matches as $i => $m) {
-                if ($i < 1) {
-                    continue;
-                }
-
-                $pathVariables[$pathVariableNames[$i - 1]] = $m;
-            }
-
-            $entries[] = [
-                'httpMethod' => strtoupper($rr->getHttpMethod()),
-                'handler' => $rr->getHandler(),
-                'pathVariables' => $pathVariables
-            ];
-        }
-
-        if (empty($entries)) {
-            return [404, null, null];
-        }
-
-        foreach ($entries as $entry) {
-            if ($entry['httpMethod'] === $httpMethod || in_array($entry['httpMethod'], ['*', 'ALL'])) {
-                return [null, $entry['handler'], is_array($entry['pathVariables']) ? $entry['pathVariables'] : []];
-            }
-        }
-
-        return [405, null, null];
-    }
-
-    private static function setRouteRuleToRequest(
-        Request $request,
-        string $httpMethod,
-        string $handlerFunc,
-        array $routeRules
-    ): bool
-    {
-        $matched = null;
-
-        /* @var RouteRule $rule */
-        foreach ($routeRules as $rule) {
-            if ($rule->getHttpMethod() === $httpMethod && $rule->getHandler() === $handlerFunc) {
-                $matched = $rule;
-                break;
-            }
-        }
-
-        if (!($matched instanceof RouteRule)) {
-            foreach ($routeRules as $rule) {
-                if ($rule->getHandler() === $handlerFunc && $rule->getHttpMethod() === '') {
-                    $matched = $rule;
-                    break;
-                }
-            }
-        }
-
-        if ($matched instanceof RouteRule) {
-            $request->withRouteRule($matched);
-            return true;
-        }
-
-        return false;
     }
 
     /**
-     * @param int|null $workerId
      * @return Middleware[]
      */
-    private static function getMiddlewares(int $workerId = null): array
+    public static function getMiddlewares(): array
     {
-        if (Swoole::inCoroutineMode(true)) {
-            if (!is_int($workerId)) {
-                $workerId = Swoole::getWorkerId();
-            }
+        $middlewares = self::$map1['middlewares'];
+        return is_array($middlewares) ? $middlewares : [];
+    }
 
-            $key = "middlewares_worker$workerId";
-        } else {
-            $key = 'middlewares_noworker';
+    private static function addRoute(int $workerId, Route $route): void
+    {
+        if ($workerId < 0) {
+            return;
         }
 
-        $handlers = self::$map1[$key];
-        return is_array($handlers) ? $handlers : [];
+        $mapKey = "route_items_worker$workerId";
+
+        if (is_array(self::$map1[$mapKey])) {
+            self::$map1[$mapKey][] = $route;
+        } else {
+            self::$map1[$mapKey] = [$route];
+        }
+    }
+
+    private static function addRequestHandler(int $workerId, string $handlerName, Closure $fn): void
+    {
+        if ($workerId < 0) {
+            return;
+        }
+
+        $mapKey = "request_handlers_worker$workerId";
+
+        if (is_array(self::$map1[$mapKey])) {
+            self::$map1[$mapKey][$handlerName] = $fn;
+        } else {
+            self::$map1[$mapKey] = [$handlerName => $fn];
+        }
+    }
+
+    private static function addControllerBean(int $workerId, string $handlerName): void
+    {
+        if ($workerId < 0) {
+            return;
+        }
+
+        $key = "controllers_worker$workerId";
+        list($clazz) = explode('@', $handlerName);
+
+        if (!is_string($clazz) || $clazz === '') {
+            return;
+        }
+
+        $clazz = StringUtils::ensureLeft($clazz, "\\");
+        $map1 = self::$map1[$key];
+
+        if (!is_array($map1)) {
+            $map1 = [];
+        }
+
+        if (isset($map1[$clazz])) {
+            return;
+        }
+
+        try {
+            $bean = new $clazz();
+        } catch (Throwable $ex) {
+            return;
+        }
+
+        if (!is_object($bean)) {
+            return;
+        }
+
+        $map1[$clazz] = $bean;
+        self::$map1[$key] = $map1;
     }
 }

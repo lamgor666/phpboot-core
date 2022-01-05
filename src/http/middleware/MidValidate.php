@@ -3,12 +3,13 @@
 namespace phpboot\http\middleware;
 
 use phpboot\exception\ValidateException;
-use phpboot\mvc\RoutingContext;
+use phpboot\http\server\Request;
+use phpboot\http\server\Response;
 use phpboot\validator\DataValidator;
 use phpboot\common\util\JsonUtils;
 use phpboot\common\util\StringUtils;
 
-class DataValidateMiddleware implements Middleware
+class MidValidate implements Middleware
 {
     private function __construct()
     {
@@ -29,36 +30,53 @@ class DataValidateMiddleware implements Middleware
         return Middleware::HIGHEST_ORDER;
     }
 
-    public function preHandle(RoutingContext $ctx): void
+    public function handle(Request $req, Response $resp): void
     {
-        if (!$ctx->next()) {
+        $rules = $req->getContextParam('validateRules');
+
+        if (is_string($rules)) {
+            $rules = JsonUtils::arrayFrom(str_replace('[syh]', '"', $rules));
+        }
+
+        if (!is_array($rules) || empty($rules)) {
             return;
         }
 
-        $request = $ctx->getRequest();
-        $routeRule = $request->getRouteRule();
-        $validateRules = $routeRule->getValidateRules();
+        $failfast = false;
+        $validateRules = [];
+
+        foreach ($rules as $s1) {
+            if (!is_string($s1) || $s1 == '') {
+                continue;
+            }
+
+            if (in_array($s1, ['true', 'false'])) {
+                $failfast = $s1 === 'true';
+                continue;
+            }
+
+            $validateRules[] = $s1;
+        }
 
         if (empty($validateRules)) {
             return;
         }
 
-        $failfast = $routeRule->isFailfast();
-        $isGet = $request->getMethod() === 'GET';
-        $contentType = $request->getHeader('Content-Type');
+        $isGet = $req->getMethod() === 'GET';
+        $contentType = $req->getHeader('Content-Type');
         $isJsonPayload = stripos($contentType, 'application/json') !== false;
 
         $isXmlPayload = stripos($contentType, 'application/xml') !== false
             || stripos($contentType, 'text/xml') !== false;
 
         if ($isGet) {
-            $data = $request->getQueryParams();
+            $data = $req->getQueryParams();
         } else if ($isJsonPayload) {
-            $data = JsonUtils::mapFrom($request->getRawBody());
+            $data = JsonUtils::mapFrom($req->getRawBody());
         } else if ($isXmlPayload) {
-            $data = StringUtils::xml2assocArray($request->getRawBody());
+            $data = StringUtils::xml2assocArray($req->getRawBody());
         } else {
-            $data = array_merge($request->getQueryParams(), $request->getFormData());
+            $data = array_merge($req->getQueryParams(), $req->getFormData());
         }
 
         if (!is_array($data)) {
@@ -68,18 +86,11 @@ class DataValidateMiddleware implements Middleware
         $result = DataValidator::validate($data, $validateRules, $failfast);
 
         if ($failfast && is_string($result) && $result !== '') {
-            $ctx->getResponse()->withPayload(new ValidateException([], $result));
-            $ctx->next(false);
-            return;
+            throw new ValidateException(true, $result);
         }
 
         if (!$failfast && is_array($result) && !empty($result)) {
-            $ctx->getResponse()->withPayload(new ValidateException($result));
-            $ctx->next(false);
+            throw new ValidateException($result);
         }
-    }
-
-    public function postHandle(RoutingContext $ctx): void
-    {
     }
 }

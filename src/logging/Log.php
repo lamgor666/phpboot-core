@@ -2,12 +2,8 @@
 
 namespace phpboot\logging;
 
-use phpboot\annotation\Scheduled;
 use Psr\Log\LoggerInterface;
 
-/**
- * @Scheduled("@every 1m")
- */
 final class Log
 {
     private function __construct()

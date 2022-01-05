@@ -2,10 +2,11 @@
 
 namespace phpboot\http\middleware;
 
+use phpboot\http\server\Request;
+use phpboot\http\server\Response;
 use phpboot\logging\LogContext;
-use phpboot\mvc\RoutingContext;
 
-class RequestLogMiddleware implements Middleware
+class MidRequestLog implements Middleware
 {
     private function __construct()
     {
@@ -26,20 +27,15 @@ class RequestLogMiddleware implements Middleware
         return Middleware::HIGHEST_ORDER;
     }
 
-    public function preHandle(RoutingContext $ctx): void
+    public function handle(Request $req, Response $resp): void
     {
         if (!LogContext::requestLogEnabled()) {
             return;
         }
 
-        if (!$ctx->next()) {
-            return;
-        }
-
-        $request = $ctx->getRequest();
-        $clientIp = $request->getClientIp();
-        $httpMethod = $request->getMethod();
-        $requestUrl = $request->getRequestUrl(true);
+        $clientIp = $req->getClientIp();
+        $httpMethod = $req->getMethod();
+        $requestUrl = $req->getRequestUrl(true);
 
         if ($httpMethod === '' || $requestUrl === '' || $clientIp === '') {
             return;
@@ -47,14 +43,10 @@ class RequestLogMiddleware implements Middleware
 
         $logger = LogContext::getRequestLogLogger();
         $logger->info("$httpMethod $requestUrl from $clientIp");
-        $requestBody = $request->getRawBody();
+        $requestBody = $req->getRawBody();
 
         if ($requestBody !== '') {
             $logger->debug($requestBody);
         }
-    }
-
-    public function postHandle(RoutingContext $ctx): void
-    {
     }
 }

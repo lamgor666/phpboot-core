@@ -3,7 +3,6 @@
 namespace phpboot\security;
 
 use phpboot\common\Cast;
-use phpboot\common\swoole\Swoole;
 use phpboot\common\util\FileUtils;
 use phpboot\common\util\StringUtils;
 use Throwable;
@@ -116,33 +115,15 @@ final class JwtSettings
         return new self($key, $settings);
     }
 
-    public static function withSettings(JwtSettings $settings, ?int $workerId = null): void
+    public static function withSettings(JwtSettings $settings): void
     {
-        if (Swoole::inCoroutineMode(true)) {
-            if (!is_int($workerId)) {
-                $workerId = Swoole::getWorkerId();
-            }
-
-            $key = "{$settings->getKey()}_worker$workerId";
-        } else {
-            $key = "{$settings->getKey()}_noworker";
-        }
-
+        $key = $settings->getKey() . '_current_settings';
         self::$map1[$key] = $settings;
     }
 
-    public static function loadCurrent(string $settingsKey, ?int $workerId = null): ?JwtSettings
+    public static function loadCurrent(string $settingsKey): ?JwtSettings
     {
-        if (Swoole::inCoroutineMode(true)) {
-            if (!is_int($workerId)) {
-                $workerId = Swoole::getWorkerId();
-            }
-
-            $key = "{$settingsKey}_worker$workerId";
-        } else {
-            $key = "{$settingsKey}_noworker";
-        }
-
+        $key = $settingsKey . '_current_settings';
         $settings = self::$map1[$key];
         return $settings instanceof JwtSettings ? $settings : null;
     }

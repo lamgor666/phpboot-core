@@ -3,7 +3,6 @@
 namespace phpboot\security;
 
 use phpboot\common\Cast;
-use phpboot\common\swoole\Swoole;
 use phpboot\common\util\ArrayUtils;
 use phpboot\common\util\StringUtils;
 use Throwable;
@@ -133,33 +132,15 @@ final class CorsSettings
         return new self($settings);
     }
 
-    public static function withSettings(CorsSettings $settings, ?int $workerId = null): void
+    public static function withSettings(CorsSettings $settings): void
     {
-        if (Swoole::inCoroutineMode(true)) {
-            if (!is_int($workerId)) {
-                $workerId = Swoole::getWorkerId();
-            }
-
-            $key = "worker$workerId";
-        } else {
-            $key = 'noworker';
-        }
-
+        $key = 'current_settings';
         self::$map1[$key] = $settings;
     }
 
-    public static function loadCurrent(?int $workerId = null): ?CorsSettings
+    public static function loadCurrent(): ?CorsSettings
     {
-        if (Swoole::inCoroutineMode(true)) {
-            if (!is_int($workerId)) {
-                $workerId = Swoole::getWorkerId();
-            }
-
-            $key = "worker$workerId";
-        } else {
-            $key = 'noworker';
-        }
-
+        $key = 'current_settings';
         $settings = self::$map1[$key];
         return $settings instanceof CorsSettings ? $settings : null;
     }

@@ -2,7 +2,8 @@
 
 namespace phpboot\http\middleware;
 
-use phpboot\mvc\RoutingContext;
+use phpboot\http\server\Request;
+use phpboot\http\server\Response;
 
 interface Middleware
 {
@@ -15,7 +16,5 @@ interface Middleware
 
     public function getOrder(): int;
 
-    public function preHandle(RoutingContext $ctx): void;
-
-    public function postHandle(RoutingContext $ctx): void;
+    public function handle(Request $req, Response $resp): void;
 }

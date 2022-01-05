@@ -4,11 +4,11 @@ namespace phpboot\http\server;
 
 use phpboot\common\util\StringUtils;
 use phpboot\exception\HttpError;
-use phpboot\http\middleware\DataValidateMiddleware;
-use phpboot\http\middleware\ExecuteTimeLogMiddleware;
-use phpboot\http\middleware\JwtAuthMiddleware;
+use phpboot\http\middleware\MidValidate;
+use phpboot\http\middleware\MidExecuteTimeLog;
+use phpboot\http\middleware\MidJwtAuth;
 use phpboot\http\middleware\Middleware;
-use phpboot\http\middleware\RequestLogMiddleware;
+use phpboot\http\middleware\MidRequestLog;
 use phpboot\logging\LogContext;
 use phpboot\Boot;
 use phpboot\mvc\HandlerFuncArgsInjector;
@@ -136,17 +136,17 @@ final class RequestHandler
         $middlewares = [];
 
         if (LogContext::requestLogEnabled()) {
-            $middlewares[] = RequestLogMiddleware::create();
+            $middlewares[] = MidRequestLog::create();
         }
 
         $routeRule = $req->getRouteRule();
 
         if ($routeRule->getJwtSettingsKey() !== '') {
-            $middlewares[] = JwtAuthMiddleware::create();
+            $middlewares[] = MidJwtAuth::create();
         }
 
         if (!empty($routeRule->getValidateRules())) {
-            $middlewares[] = DataValidateMiddleware::create();
+            $middlewares[] = MidValidate::create();
         }
 
         $customMiddlewares = array_filter($customMiddlewares, function ($it) {
@@ -182,7 +182,7 @@ final class RequestHandler
         $middlewares = empty($middlewares) ? [] : array_values($middlewares);
 
         if (LogContext::executeTimeLogEnabled()) {
-            $middlewares[] = ExecuteTimeLogMiddleware::create();
+            $middlewares[] = MidExecuteTimeLog::create();
         }
 
         if (empty($middlewares)) {

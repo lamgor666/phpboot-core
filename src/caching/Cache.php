@@ -18,19 +18,11 @@ final class Cache
     {
     }
 
-    public static function cacheKeyPrefix(?string $prefix = null, ?int $workerId = null): string
+    public static function cacheKeyPrefix(?string $prefix = null): string
     {
-        if (Swoole::inCoroutineMode(true)) {
-            if (!is_int($workerId)) {
-                $workerId = Swoole::getWorkerId();
-            }
+        $key = 'cacheKey_prefix';
 
-            $key = "cacheKeyPrefix_worker$workerId";
-        } else {
-            $key = 'cacheKeyPrefix_noworker';
-        }
-
-        if (is_string($prefix)) {
+        if (is_string($prefix) && $prefix !== '') {
             self::$map1[$key] = $prefix;
             return '';
         }
