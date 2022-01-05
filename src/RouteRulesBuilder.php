@@ -606,45 +606,45 @@ final class RouteRulesBuilder {
 
         foreach ($rule['handlerFuncArgs'] as $i => $argInfo) {
             if (!is_array($argInfo)) {
-                $codeParts[] = sprintf("$tab1\arg%d = null;", $i);
+                $codeParts[] = sprintf("$tab1\$arg%d = null;", $i);
                 $argList[] = sprintf("\$arg%d", $i);
                 continue;
             }
 
             if ($argInfo['rawReq']) {
-                $codeParts[] = sprintf("$tab1\arg%d = \$req;", $i);
+                $codeParts[] = sprintf("$tab1\$arg%d = \$req;", $i);
                 $argList[] = sprintf("\$arg%d", $i);
                 continue;
             }
 
             if ($argInfo['rawJwt']) {
-                $codeParts[] = sprintf("$tab1\arg%d = \$req->getJwt();", $i);
+                $codeParts[] = sprintf("$tab1\$arg%d = \$req->getJwt();", $i);
                 $argList[] = sprintf("\$arg%d", $i);
                 continue;
             }
 
             if ($argInfo['clientIp']) {
-                $codeParts[] = sprintf("$tab1\arg%d = \$req->getClientIp();", $i);
+                $codeParts[] = sprintf("$tab1\$arg%d = \$req->getClientIp();", $i);
                 $argList[] = sprintf("\$arg%d", $i);
                 continue;
             }
 
             if ($argInfo['httpHeaderName'] !== '') {
                 $hname = $argInfo['httpHeaderName'];
-                $codeParts[] = sprintf("$tab1\arg%d = \$req->getHeader('%s');", $i, $hname);
+                $codeParts[] = sprintf("$tab1\$arg%d = \$req->getHeader('%s');", $i, $hname);
                 $argList[] = sprintf("\$arg%d", $i);
                 continue;
             }
 
             if ($argInfo['rawBody']) {
-                $codeParts[] = sprintf("$tab1\arg%d = \$req->getRawBody();", $i);
+                $codeParts[] = sprintf("$tab1\$arg%d = \$req->getRawBody();", $i);
                 $argList[] = sprintf("\$arg%d", $i);
                 continue;
             }
 
             if ($argInfo['uploadedFileKey'] !== '') {
                 $fkey = $argInfo['uploadedFileKey'];
-                $codeParts[] = sprintf("$tab1\arg%d = \$req->getUploadedFile('%s');", $i, $fkey);
+                $codeParts[] = sprintf("$tab1\$arg%d = \$req->getUploadedFile('%s');", $i, $fkey);
                 $argList[] = sprintf("\$arg%d", $i);
                 continue;
             }
@@ -655,19 +655,19 @@ final class RouteRulesBuilder {
 
                 switch ($argInfo['type']) {
                     case 'int':
-                        $codeParts[] = sprintf("$tab1\arg%d = \$req->pathVariableAsInt('%s', '%s');", $i, $pname, $dv);
+                        $codeParts[] = sprintf("$tab1\$arg%d = \$req->pathVariableAsInt('%s', '%s');", $i, $pname, $dv);
                         break;
                     case 'float':
-                        $codeParts[] = sprintf("$tab1\arg%d = \$req->pathVariableAsFloat('%s', '%s');", $i, $pname, $dv);
+                        $codeParts[] = sprintf("$tab1\$arg%d = \$req->pathVariableAsFloat('%s', '%s');", $i, $pname, $dv);
                         break;
                     case 'bool':
-                        $codeParts[] = sprintf("$tab1\arg%d = \$req->pathVariableAsBoolean('%s', '%s');", $i, $pname, $dv);
+                        $codeParts[] = sprintf("$tab1\$arg%d = \$req->pathVariableAsBoolean('%s', '%s');", $i, $pname, $dv);
                         break;
                     case 'string':
-                        $codeParts[] = sprintf("$tab1\arg%d = \$req->pathVariableAsString('%s', '%s');", $i, $pname, $dv);
+                        $codeParts[] = sprintf("$tab1\$arg%d = \$req->pathVariableAsString('%s', '%s');", $i, $pname, $dv);
                         break;
                     default:
-                        $codeParts[] = sprintf("$tab1\arg%d = null;", $i);
+                        $codeParts[] = sprintf("$tab1\$arg%d = null;", $i);
                         break;
                 }
 
@@ -681,22 +681,22 @@ final class RouteRulesBuilder {
 
                 switch ($argInfo['type']) {
                     case 'int':
-                        $codeParts[] = sprintf("$tab1\arg%d = \$req->jwtIntCliam('%s', '%s');", $i, $cname, $dv);
+                        $codeParts[] = sprintf("$tab1\$arg%d = \$req->jwtIntCliam('%s', '%s');", $i, $cname, $dv);
                         break;
                     case 'float':
-                        $codeParts[] = sprintf("$tab1\arg%d = \$req->jwtFloatClaim('%s', '%s');", $i, $cname, $dv);
+                        $codeParts[] = sprintf("$tab1\$arg%d = \$req->jwtFloatClaim('%s', '%s');", $i, $cname, $dv);
                         break;
                     case 'bool':
-                        $codeParts[] = sprintf("$tab1\arg%d = \$req->jwtBooleanClaim('%s', '%s');", $i, $cname, $dv);
+                        $codeParts[] = sprintf("$tab1\$arg%d = \$req->jwtBooleanClaim('%s', '%s');", $i, $cname, $dv);
                         break;
                     case 'string':
-                        $codeParts[] = sprintf("$tab1\arg%d = \$req->jwtStringClaim('%s', '%s');", $i, $cname, $dv);
+                        $codeParts[] = sprintf("$tab1\$arg%d = \$req->jwtStringClaim('%s', '%s');", $i, $cname, $dv);
                         break;
                     case 'array':
-                        $codeParts[] = sprintf("$tab1\arg%d = \$req->jwtArrayClaim('%s');", $i, $cname);
+                        $codeParts[] = sprintf("$tab1\$arg%d = \$req->jwtArrayClaim('%s');", $i, $cname);
                         break;
                     default:
-                        $codeParts[] = sprintf("$tab1\arg%d = null;", $i);
+                        $codeParts[] = sprintf("$tab1\$arg%d = null;", $i);
                         break;
                 }
 
@@ -710,29 +710,29 @@ final class RouteRulesBuilder {
 
                 switch ($argInfo['type']) {
                     case 'int':
-                        $codeParts[] = sprintf("$tab1\arg%d = \$req->requestParamAsInt('%s', '%s');", $i, $rname, $dv);
+                        $codeParts[] = sprintf("$tab1\$arg%d = \$req->requestParamAsInt('%s', '%s');", $i, $rname, $dv);
                         break;
                     case 'float':
-                        $codeParts[] = sprintf("$tab1\arg%d = \$req->requestParamAsFloat('%s', '%s');", $i, $rname, $dv);
+                        $codeParts[] = sprintf("$tab1\$arg%d = \$req->requestParamAsFloat('%s', '%s');", $i, $rname, $dv);
                         break;
                     case 'bool':
-                        $codeParts[] = sprintf("$tab1\arg%d = \$req->requestParamAsBoolean('%s', '%s');", $i, $rname, $dv);
+                        $codeParts[] = sprintf("$tab1\$arg%d = \$req->requestParamAsBoolean('%s', '%s');", $i, $rname, $dv);
                         break;
                     case 'string':
                         if ($argInfo['decimal']) {
                             $securityMode = ReqParamSecurityMode::STRIP_TAGS;
-                            $codeParts[] = sprintf("$tab1\arg%d = bcadd(\$req->requestParamAsString('%s', %d, '%s'), 0, 2);", $i, $rname, $securityMode, $dv);
+                            $codeParts[] = sprintf("$tab1\$arg%d = bcadd(\$req->requestParamAsString('%s', %d, '%s'), 0, 2);", $i, $rname, $securityMode, $dv);
                         } else {
                             $securityMode = $argInfo['securityMode'];
-                            $codeParts[] = sprintf("$tab1\arg%d = \$req->requestParamAsString('%s', %d, '%s');", $i, $rname, $securityMode, $dv);
+                            $codeParts[] = sprintf("$tab1\$arg%d = \$req->requestParamAsString('%s', %d, '%s');", $i, $rname, $securityMode, $dv);
                         }
 
                         break;
                     case 'array':
-                        $codeParts[] = sprintf("$tab1\arg%d = \$req->requestParamAsArray('%s');", $i, $rname);
+                        $codeParts[] = sprintf("$tab1\$arg%d = \$req->requestParamAsArray('%s');", $i, $rname);
                         break;
                     default:
-                        $codeParts[] = sprintf("$tab1\arg%d = null;", $i);
+                        $codeParts[] = sprintf("$tab1\$arg%d = null;", $i);
                         break;
                 }
 
@@ -742,12 +742,12 @@ final class RouteRulesBuilder {
 
             if ($argInfo['mapBind']) {
                 $mapBindRules = implode(', ', $argInfo['mapBindRules']);
-                $codeParts[] = sprintf("$tab1\arg%d = \$req->getMap('%s');", $i, $mapBindRules);
+                $codeParts[] = sprintf("$tab1\$arg%d = \$req->getMap('%s');", $i, $mapBindRules);
                 $argList[] = sprintf("\$arg%d", $i);
                 continue;
             }
 
-            $codeParts[] = sprintf("$tab1\arg%d = null;", $i);
+            $codeParts[] = sprintf("$tab1\$arg%d = null;", $i);
             $argList[] = sprintf("\$arg%d", $i);
         }
 
