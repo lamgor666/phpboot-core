@@ -217,7 +217,7 @@ final class RouteRulesBuilder {
                     sprintf("\$route%03d = new \\Symfony\\Component\\Routing\\Route('%s');", $hidx, $rule['requestMapping']),
                     sprintf("\$route%03d->setMethods(%s);", $hidx, $httpMethods),
                     sprintf("\$route%03d->addOptions(['handlerName' => '%s']);", $hidx, $rule['handler']),
-                    sprintf("\$routeRulesCache['routeItems'][] = \$rout%03d;", $hidx),
+                    sprintf("\$routeRulesCache['routeItems'][] = \$route%03d;", $hidx),
                     ''
                 );
 
